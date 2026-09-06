@@ -17,7 +17,7 @@ import psutil
 import requests
 import telebot
 from telebot import types
-from flask import Flask
+from flask import Flask, request, jsonify
 
 # --- Button Color Adapter (Telegram Bot API 7.10+) ---
 _orig_init = types.InlineKeyboardButton.__init__
@@ -67,21 +67,6 @@ logging.basicConfig(level=logging.INFO, format='%(asctime)s [%(levelname)s] %(me
 logger = logging.getLogger("Host")
 bot = telebot.TeleBot(TOKEN, parse_mode='Markdown')
 
-# --- Keep Alive Daemon (For Render Web Service) ---
-app = Flask("HostDaemon")
-
-@app.route('/')
-def http_home():
-    return {"status": "ONLINE", "running": len(bot_scripts)}, 200
-
-def run_flask():
-    port = int(os.environ.get("PORT", 8080))
-    app.run(host='0.0.0.0', port=port, use_reloader=False)
-
-def keep_alive():
-    t = threading.Thread(target=run_flask, daemon=True)
-    t.start()
-
 # --- Globals & Database ---
 START_TIME = time.time()
 bot_scripts = {}
@@ -105,6 +90,7 @@ CORE_MODS = {
     'zipfile', 'tempfile', 'shutil', 'sqlite3', 'atexit'
 }
 
+# --- Database Layer ---
 def init_db():
     with DB_LOCK:
         try:
@@ -115,7 +101,10 @@ def init_db():
             c.execute('CREATE TABLE IF NOT EXISTS user_files (user_id INTEGER, file_name TEXT, file_type TEXT, PRIMARY KEY (user_id, file_name))')
             c.execute('CREATE TABLE IF NOT EXISTS active_users (user_id INTEGER PRIMARY KEY)')
             c.execute('CREATE TABLE IF NOT EXISTS admins (user_id INTEGER PRIMARY KEY)')
-            c.execute('CREATE TABLE IF NOT EXISTS pending_vip_requests (id INTEGER PRIMARY KEY AUTOINCREMENT, user_id INTEGER, plan_name TEXT, days INTEGER, amount INTEGER, status TEXT DEFAULT "pending")')
+            c.execute('''CREATE TABLE IF NOT EXISTS pending_vip_requests (
+                            id INTEGER PRIMARY KEY AUTOINCREMENT, user_id INTEGER,
+                            plan_name TEXT, days INTEGER, amount INTEGER, status TEXT DEFAULT "pending"
+                        )''')
             c.execute('INSERT OR IGNORE INTO admins VALUES (?)', (OWNER_ID,))
             if ADMIN_ID != OWNER_ID:
                 c.execute('INSERT OR IGNORE INTO admins VALUES (?)', (ADMIN_ID,))
@@ -199,47 +188,6 @@ def save_subscription_db(uid, expiry):
         except Exception as e:
             logger.error(f"Save sub error: {e}")
 
-def remove_subscription_db(uid):
-    with DB_LOCK:
-        try:
-            conn = sqlite3.connect(DB_PATH, check_same_thread=False)
-            c = conn.cursor()
-            c.execute('DELETE FROM subscriptions WHERE user_id = ?', (uid,))
-            conn.commit()
-            conn.close()
-            user_subscriptions.pop(uid, None)
-        except Exception as e:
-            logger.error(f"Remove sub error: {e}")
-
-def add_admin_db(aid):
-    with DB_LOCK:
-        try:
-            conn = sqlite3.connect(DB_PATH, check_same_thread=False)
-            c = conn.cursor()
-            c.execute('INSERT OR IGNORE INTO admins VALUES (?)', (aid,))
-            conn.commit()
-            conn.close()
-            admin_ids.add(aid)
-        except Exception as e:
-            logger.error(f"Add admin error: {e}")
-
-def remove_admin_db(aid):
-    if aid == OWNER_ID: return False
-    with DB_LOCK:
-        try:
-            conn = sqlite3.connect(DB_PATH, check_same_thread=False)
-            c = conn.cursor()
-            c.execute('DELETE FROM admins WHERE user_id = ?', (aid,))
-            conn.commit()
-            ok = c.rowcount > 0
-            conn.close()
-            admin_ids.discard(aid)
-            return ok
-        except Exception as e:
-            logger.error(f"Remove admin error: {e}")
-            return False
-
-# --- Helpers ---
 def get_user_folder(uid):
     f = os.path.join(UPLOAD_BOTS_DIR, str(uid))
     os.makedirs(f, exist_ok=True)
@@ -258,10 +206,9 @@ def get_user_tier_name(uid):
     if uid in user_subscriptions:
         exp = user_subscriptions[uid].get('expiry')
         if exp and exp > datetime.now(): return "⭐ VIP"
-        remove_subscription_db(uid)
     return "🆓 Free"
 
-# --- Supervisor Engine ---
+# --- Process Execution & Supervisor Engine ---
 def is_bot_running(owner_id, fn):
     key = f"{owner_id}_{fn}"
     info = bot_scripts.get(key)
@@ -298,28 +245,28 @@ def terminate_process_tree(key):
             except Exception: pass
     bot_scripts.pop(key, None)
 
-def resolve_pip(mod, reply_msg):
+def resolve_pip(mod, reply_target=None):
     pkg = PYPI_MAP.get(mod.lower(), mod)
     if mod.lower() in CORE_MODS: return False
     try:
-        bot.reply_to(reply_msg, f"📦 Auto-installing: `{pkg}`...", parse_mode='Markdown')
+        if reply_target and hasattr(reply_target, 'chat'):
+            bot.reply_to(reply_target, f"📦 Auto-installing: `{pkg}`...", parse_mode='Markdown')
         res = subprocess.run([sys.executable, '-m', 'pip', 'install', '--quiet', pkg], capture_output=True)
         return res.returncode == 0
     except Exception:
         return False
 
-def resolve_npm(mod, cwd, reply_msg):
+def resolve_npm(mod, cwd, reply_target=None):
     try:
-        bot.reply_to(reply_msg, f"📦 Auto-installing npm: `{mod}`...", parse_mode='Markdown')
+        if reply_target and hasattr(reply_target, 'chat'):
+            bot.reply_to(reply_target, f"📦 Auto-installing npm: `{mod}`...", parse_mode='Markdown')
         res = subprocess.run(['npm', 'install', '--no-audit', '--no-fund', mod], cwd=cwd, capture_output=True)
         return res.returncode == 0
     except Exception:
         return False
 
-def launch_py(path, owner_id, folder, fn, reply_msg, attempt=1):
-    if attempt > 2:
-        bot.reply_to(reply_msg, f"❌ Failed to start `{fn}` after auto-dependencies.")
-        return
+def launch_py(path, owner_id, folder, fn, reply_target=None, attempt=1):
+    if attempt > 2: return
     key = f"{owner_id}_{fn}"
     if attempt == 1:
         try:
@@ -327,9 +274,9 @@ def launch_py(path, owner_id, folder, fn, reply_msg, attempt=1):
             _, err = chk.communicate(timeout=4)
             if chk.returncode != 0 and err:
                 m = re.search(r"ModuleNotFoundError: No module named '(.+?)'", err)
-                if m and resolve_pip(m.group(1).strip().strip("'\""), reply_msg):
+                if m and resolve_pip(m.group(1).strip().strip("'\""), reply_target):
                     time.sleep(1)
-                    launch_py(path, owner_id, folder, fn, reply_msg, attempt=2)
+                    launch_py(path, owner_id, folder, fn, reply_target, attempt=2)
                     return
         except subprocess.TimeoutExpired: chk.kill()
         except Exception: pass
@@ -339,14 +286,14 @@ def launch_py(path, owner_id, folder, fn, reply_msg, attempt=1):
         lf = open(log_p, 'w', encoding='utf-8', errors='ignore')
         p = subprocess.Popen([sys.executable, path], cwd=folder, stdout=lf, stderr=lf, stdin=subprocess.PIPE)
         bot_scripts[key] = {'process': p, 'log_file': lf, 'file_name': fn, 'owner_id': owner_id, 'start_time': datetime.now()}
-        bot.reply_to(reply_msg, f"✅ **Script Started:** `{fn}`\n🔹 **PID:** `{p.pid}` | **Type:** Python")
+        if reply_target and hasattr(reply_target, 'chat'):
+            bot.reply_to(reply_target, f"✅ **Script Started:** `{fn}`\n🔹 **PID:** `{p.pid}` | **Type:** Python")
     except Exception as e:
-        bot.reply_to(reply_msg, f"❌ Execution Error: {e}")
+        if reply_target and hasattr(reply_target, 'chat'):
+            bot.reply_to(reply_target, f"❌ Execution Error: {e}")
 
-def launch_js(path, owner_id, folder, fn, reply_msg, attempt=1):
-    if attempt > 2:
-        bot.reply_to(reply_msg, f"❌ Failed to start `{fn}` after npm resolution.")
-        return
+def launch_js(path, owner_id, folder, fn, reply_target=None, attempt=1):
+    if attempt > 2: return
     key = f"{owner_id}_{fn}"
     if attempt == 1:
         try:
@@ -354,14 +301,11 @@ def launch_js(path, owner_id, folder, fn, reply_msg, attempt=1):
             _, err = chk.communicate(timeout=4)
             if chk.returncode != 0 and err:
                 m = re.search(r"Cannot find module '(.+?)'", err)
-                if m and not m.group(1).startswith(('.', '/')) and resolve_npm(m.group(1).strip().strip("'\""), folder, reply_msg):
+                if m and not m.group(1).startswith(('.', '/')) and resolve_npm(m.group(1).strip().strip("'\""), folder, reply_target):
                     time.sleep(1)
-                    launch_js(path, owner_id, folder, fn, reply_msg, attempt=2)
+                    launch_js(path, owner_id, folder, fn, reply_target, attempt=2)
                     return
         except subprocess.TimeoutExpired: chk.kill()
-        except FileNotFoundError:
-            bot.reply_to(reply_msg, "❌ Node.js is not installed on this host system.")
-            return
         except Exception: pass
 
     log_p = os.path.join(folder, f"{os.path.splitext(fn)[0]}.log")
@@ -369,13 +313,13 @@ def launch_js(path, owner_id, folder, fn, reply_msg, attempt=1):
         lf = open(log_p, 'w', encoding='utf-8', errors='ignore')
         p = subprocess.Popen(['node', path], cwd=folder, stdout=lf, stderr=lf, stdin=subprocess.PIPE)
         bot_scripts[key] = {'process': p, 'log_file': lf, 'file_name': fn, 'owner_id': owner_id, 'start_time': datetime.now()}
-        bot.reply_to(reply_msg, f"✅ **Script Started:** `{fn}`\n🔹 **PID:** `{p.pid}` | **Type:** Node.js")
+        if reply_target and hasattr(reply_target, 'chat'):
+            bot.reply_to(reply_target, f"✅ **Script Started:** `{fn}`\n🔹 **PID:** `{p.pid}` | **Type:** Node.js")
     except Exception as e:
-        bot.reply_to(reply_msg, f"❌ Execution Error: {e}")
+        if reply_target and hasattr(reply_target, 'chat'):
+            bot.reply_to(reply_target, f"❌ Execution Error: {e}")
 
-# --- Zip Extraction ---
-def process_zip_payload(file_bytes, zip_name, message):
-    uid = message.from_user.id
+def extract_and_deploy_zip(file_bytes, zip_name, uid, reply_target=None):
     user_f = get_user_folder(uid)
     temp_d = tempfile.mkdtemp(prefix=f"zip_{uid}_")
     try:
@@ -390,10 +334,8 @@ def process_zip_payload(file_bytes, zip_name, message):
 
         items = os.listdir(temp_d)
         if 'requirements.txt' in items:
-            bot.reply_to(message, "📦 Installing requirements.txt...")
             subprocess.run([sys.executable, '-m', 'pip', 'install', '--quiet', '-r', os.path.join(temp_d, 'requirements.txt')], check=False)
         if 'package.json' in items:
-            bot.reply_to(message, "📦 Installing npm packages...")
             subprocess.run(['npm', 'install', '--no-audit', '--no-fund'], cwd=temp_d, check=False)
 
         py_f = [f for f in items if f.endswith('.py')]
@@ -406,8 +348,7 @@ def process_zip_payload(file_bytes, zip_name, message):
             if py_f: target, ftype = py_f[0], 'py'
             elif js_f: target, ftype = js_f[0], 'js'
         if not target:
-            bot.reply_to(message, "❌ No `.py` or `.js` script found in the archive.")
-            return
+            return False, "No executable script (.py / .js) found in archive root."
 
         for it in os.listdir(temp_d):
             s = os.path.join(temp_d, it)
@@ -418,17 +359,267 @@ def process_zip_payload(file_bytes, zip_name, message):
 
         save_user_file_db(uid, target, ftype)
         entry = os.path.join(user_f, target)
-        bot.reply_to(message, f"📦 **Extracted:** `{target}`\nStarting runtime...")
         if ftype == 'py':
-            threading.Thread(target=launch_py, args=(entry, uid, user_f, target, message), daemon=True).start()
+            threading.Thread(target=launch_py, args=(entry, uid, user_f, target, reply_target), daemon=True).start()
         else:
-            threading.Thread(target=launch_js, args=(entry, uid, user_f, target, message), daemon=True).start()
+            threading.Thread(target=launch_js, args=(entry, uid, user_f, target, reply_target), daemon=True).start()
+        return True, target
     except Exception as e:
-        bot.reply_to(message, f"❌ Archive Error: {e}")
+        return False, str(e)
     finally:
         shutil.rmtree(temp_d, ignore_errors=True)
 
-# --- Floating Keyboards (Single Line Safe Layout) ---
+# ==============================================================================
+# 🌐 FLASK REST API FOR TELEGRAM MINI APP (BIDIRECTIONAL SYNC)
+# ==============================================================================
+app = Flask("CloudHostDaemon")
+
+@app.after_request
+def enable_cors(response):
+    response.headers['Access-Control-Allow-Origin'] = '*'
+    response.headers['Access-Control-Allow-Headers'] = 'Content-Type,Authorization'
+    response.headers['Access-Control-Allow-Methods'] = 'GET,PUT,POST,DELETE,OPTIONS'
+    return response
+
+# Serve Mini App directly if index.html is in root
+@app.route('/')
+def serve_app():
+    html_path = os.path.join(BASE_DIR, 'index.html')
+    if os.path.exists(html_path):
+        with open(html_path, 'r', encoding='utf-8') as f:
+            return f.read(), 200, {'Content-Type': 'text/html; charset=utf-8'}
+    return {"status": "ONLINE", "running_bots": len(bot_scripts)}, 200
+
+# 1. Real User Telemetry & Files
+@app.route('/api/user_info', methods=['GET', 'OPTIONS'])
+def api_user_info():
+    if request.method == 'OPTIONS': return {}, 200
+    uid = int(request.args.get('user_id', 0))
+    register_active_user(uid)
+
+    quota = get_user_quota(uid)
+    quota_str = str(quota) if quota != float('inf') else "INF"
+    tier = get_user_tier_name(uid)
+
+    flist = user_files.get(uid, [])
+    payload_files = []
+    for fn, ft in sorted(flist):
+        run = is_bot_running(uid, fn)
+        pid = None
+        if run:
+            info = bot_scripts.get(f"{uid}_{fn}")
+            if info and info.get('process'): pid = info['process'].pid
+        payload_files.append({"name": fn, "type": ft, "running": run, "pid": pid})
+
+    uptime = str(timedelta(seconds=int(time.time() - START_TIME)))
+    return jsonify({
+        "success": True,
+        "user_id": uid,
+        "tier": tier,
+        "quota": quota,
+        "quota_str": quota_str,
+        "is_admin": uid in admin_ids,
+        "is_owner": uid == OWNER_ID,
+        "platform_locked": bot_locked,
+        "metrics": {
+            "cpu": psutil.cpu_percent(interval=None),
+            "ram": psutil.virtual_memory().percent,
+            "active_instances": sum(1 for (k, v) in bot_scripts.items() if is_bot_running(v['owner_id'], v['file_name'])),
+            "uptime": uptime
+        },
+        "files": payload_files
+    })
+
+# 2. File Upload / Hosting via Mini App
+@app.route('/api/upload', methods=['POST', 'OPTIONS'])
+def api_upload():
+    if request.method == 'OPTIONS': return {}, 200
+    uid = int(request.form.get('user_id', 0))
+    if not uid: return jsonify({"success": False, "error": "Missing user_id"}), 400
+
+    if bot_locked and uid not in admin_ids:
+        return jsonify({"success": False, "error": "Platform is locked by administrator."}), 403
+
+    if len(user_files.get(uid, [])) >= get_user_quota(uid):
+        return jsonify({"success": False, "error": "Storage quota exceeded. Delete a file or acquire VIP."}), 400
+
+    file = request.files.get('file')
+    if not file: return jsonify({"success": False, "error": "No file uploaded"}), 400
+
+    fn = file.filename or "script"
+    ext = os.path.splitext(fn)[1].lower()
+    if ext not in ['.py', '.js', '.zip']:
+        return jsonify({"success": False, "error": "Only .py, .js, and .zip are supported."}), 400
+
+    file_bytes = file.read()
+    user_f = get_user_folder(uid)
+
+    # Forward alert to owner
+    try:
+        f_kb = round(len(file_bytes) / 1024, 2)
+        bot.send_message(
+            OWNER_ID,
+            f"📥 **NEW UPLOAD (MINI APP)**\n━━━━━━━━━━━━\n👤 **From:** `{uid}`\n📄 **File:** `{fn}`\n📦 **Size:** `{f_kb} KB`"
+        )
+    except Exception: pass
+
+    if ext == '.zip':
+        ok, res = extract_and_deploy_zip(file_bytes, fn, uid)
+        if not ok: return jsonify({"success": False, "error": res}), 500
+        main_entry = res
+    else:
+        ft = 'js' if ext == '.js' else 'py'
+        dest = os.path.join(user_f, fn)
+        with open(dest, 'wb') as f: f.write(file_bytes)
+        save_user_file_db(uid, fn, ft)
+        if ft == 'py':
+            threading.Thread(target=launch_py, args=(dest, uid, user_f, fn), daemon=True).start()
+        else:
+            threading.Thread(target=launch_js, args=(dest, uid, user_f, fn), daemon=True).start()
+        main_entry = fn
+
+    return jsonify({"success": True, "message": f"Successfully launched {main_entry}!", "file_name": main_entry})
+
+# 3. Instance Process Control (Start/Stop/Restart/Delete)
+@app.route('/api/action', methods=['POST', 'OPTIONS'])
+def api_action():
+    if request.method == 'OPTIONS': return {}, 200
+    data = request.get_json(silent=True) or request.form
+    uid = int(data.get('user_id', 0))
+    fn = data.get('file_name', '')
+    act = data.get('action', '')
+
+    if not uid or not fn: return jsonify({"success": False, "error": "Invalid params"}), 400
+
+    user_f = get_user_folder(uid)
+    path = os.path.join(user_f, fn)
+    ext = os.path.splitext(fn)[1].lower()
+
+    if act == 'start':
+        if not os.path.exists(path): return jsonify({"success": False, "error": "File missing on disk"}), 404
+        if is_bot_running(uid, fn): return jsonify({"success": False, "error": "Already running"}), 400
+        if ext == '.py': threading.Thread(target=launch_py, args=(path, uid, user_f, fn), daemon=True).start()
+        else: threading.Thread(target=launch_js, args=(path, uid, user_f, fn), daemon=True).start()
+        time.sleep(1)
+        return jsonify({"success": True, "running": True})
+
+    elif act == 'stop':
+        terminate_process_tree(f"{uid}_{fn}")
+        return jsonify({"success": True, "running": False})
+
+    elif act == 'restart':
+        terminate_process_tree(f"{uid}_{fn}")
+        time.sleep(1)
+        if ext == '.py': threading.Thread(target=launch_py, args=(path, uid, user_f, fn), daemon=True).start()
+        else: threading.Thread(target=launch_js, args=(path, uid, user_f, fn), daemon=True).start()
+        time.sleep(1)
+        return jsonify({"success": True, "running": True})
+
+    elif act == 'delete':
+        terminate_process_tree(f"{uid}_{fn}")
+        for del_item in [fn, f"{os.path.splitext(fn)[0]}.log"]:
+            target_p = os.path.join(user_f, del_item)
+            if os.path.exists(target_p):
+                try: os.remove(target_p)
+                except Exception: pass
+        remove_user_file_db(uid, fn)
+        return jsonify({"success": True, "deleted": True})
+
+    return jsonify({"success": False, "error": "Unknown action"}), 400
+
+# 4. Stream Logs API
+@app.route('/api/logs', methods=['GET', 'OPTIONS'])
+def api_logs():
+    if request.method == 'OPTIONS': return {}, 200
+    uid = int(request.args.get('user_id', 0))
+    fn = request.args.get('file_name', '')
+    lp = os.path.join(get_user_folder(uid), f"{os.path.splitext(fn)[0]}.log")
+    if not os.path.exists(lp):
+        return jsonify({"success": True, "logs": "[LOGS EMPTY: No execution stream recorded yet]"})
+    try:
+        with open(lp, 'r', encoding='utf-8', errors='ignore') as f:
+            lines = f.readlines()
+            tail = "".join(lines[-40:]) if lines else "[LOG BUFFER EMPTY]"
+            return jsonify({"success": True, "logs": tail})
+    except Exception as e:
+        return jsonify({"success": False, "error": str(e)}), 500
+
+# 5. VIP Nagad Verification Dispatcher
+@app.route('/api/vip_proof', methods=['POST', 'OPTIONS'])
+def api_vip_proof():
+    if request.method == 'OPTIONS': return {}, 200
+    uid = int(request.form.get('user_id', 0))
+    plan = request.form.get('plan', '1 Month')
+    days = int(request.form.get('days', 30))
+    amt = int(request.form.get('amount', 450))
+    tx_id = request.form.get('tx_id', 'None Provided')
+    shot = request.files.get('screenshot')
+
+    with DB_LOCK:
+        conn = sqlite3.connect(DB_PATH, check_same_thread=False)
+        c = conn.cursor()
+        c.execute('INSERT INTO pending_vip_requests (user_id, plan_name, days, amount) VALUES (?, ?, ?, ?)', (uid, plan, days, amt))
+        conn.commit()
+        req_id = c.lastrowid
+        conn.close()
+
+    m = types.InlineKeyboardMarkup(row_width=2)
+    m.row(btn("✅ Approve", callback_data=f"vip_ok_{req_id}", style="success"), btn("❌ Reject", callback_data=f"vip_no_{req_id}", style="danger"))
+    cap = f"🔔 **VIP PAYMENT SUBMITTED (MINI APP)**\n━━━━━━━━━━━━\n👤 **Operator:** `{uid}`\n📦 **Plan:** `{plan}` ({days} Days)\n💵 **Amount:** `{amt} BDT`\n📝 **TxID:** `{tx_id}`"
+
+    for aid in admin_ids:
+        try:
+            if shot:
+                shot_bytes = shot.read()
+                bot.send_photo(aid, shot_bytes, caption=cap, reply_markup=m)
+            else:
+                bot.send_message(aid, cap, reply_markup=m)
+        except Exception: pass
+
+    return jsonify({"success": True, "message": "Verification transmitted successfully."})
+
+# 6. Admin Overrides
+@app.route('/api/admin_action', methods=['POST', 'OPTIONS'])
+def api_admin_action():
+    if request.method == 'OPTIONS': return {}, 200
+    global bot_locked
+    data = request.get_json(silent=True) or request.form
+    aid = int(data.get('admin_id', 0))
+    act = data.get('action', '')
+
+    if aid not in admin_ids:
+        return jsonify({"success": False, "error": "Unauthorized"}), 403
+
+    if act == 'toggle_lock':
+        bot_locked = not bot_locked
+        return jsonify({"success": True, "locked": bot_locked})
+    elif act == 'run_all':
+        started = 0
+        for u, flist in dict(user_files).items():
+            user_f = get_user_folder(u)
+            for fn, ft in flist:
+                if not is_bot_running(u, fn):
+                    fp = os.path.join(user_f, fn)
+                    if os.path.exists(fp):
+                        if ft == 'py': threading.Thread(target=launch_py, args=(fp, u, user_f, fn), daemon=True).start()
+                        else: threading.Thread(target=launch_js, args=(fp, u, user_f, fn), daemon=True).start()
+                        started += 1
+                        time.sleep(0.3)
+        return jsonify({"success": True, "started": started})
+
+    return jsonify({"success": False, "error": "Invalid action"}), 400
+
+def run_flask():
+    port = int(os.environ.get("PORT", 8080))
+    app.run(host='0.0.0.0', port=port, use_reloader=False)
+
+def keep_alive():
+    t = threading.Thread(target=run_flask, daemon=True)
+    t.start()
+
+# ==============================================================================
+# 🎮 TELEGRAM BOT HANDLERS & INLINE MENUS
+# ==============================================================================
 def render_main_dashboard_markup(uid):
     m = types.InlineKeyboardMarkup(row_width=2)
     m.row(btn("📢 Updates", url=f"https://t.me/{UPDATE_CHANNEL.replace('@', '')}", style="primary"), btn("💬 Support", url=f"https://t.me/{YOUR_USERNAME.replace('@', '')}", style="primary"))
@@ -464,19 +655,6 @@ def render_instance_control_markup(owner_id, fn, is_running):
     m.row(btn("🔙 Back to Files", callback_data="ui_check_files", style="primary"))
     return m
 
-def render_admin_panel_markup():
-    m = types.InlineKeyboardMarkup(row_width=2)
-    m.row(btn("➕ Add Admin", callback_data="adm_add", style="primary"), btn("➖ Remove Admin", callback_data="adm_rem", style="danger"))
-    m.row(btn("📋 Admin List", callback_data="adm_list", style="primary"), btn("🔙 Main Menu", callback_data="ui_main", style="primary"))
-    return m
-
-def render_subscriptions_markup():
-    m = types.InlineKeyboardMarkup(row_width=2)
-    m.row(btn("➕ Add Sub", callback_data="sub_add", style="success"), btn("➖ Remove Sub", callback_data="sub_rem", style="danger"))
-    m.row(btn("🔍 Check Sub", callback_data="sub_chk", style="primary"), btn("🔙 Main Menu", callback_data="ui_main", style="primary"))
-    return m
-
-# --- Text Views ---
 def build_welcome_text(uid, name, username):
     tier = get_user_tier_name(uid)
     quota = get_user_quota(uid)
@@ -493,7 +671,6 @@ def build_welcome_text(uid, name, username):
             exp_info = f"\n⏳ **VIP Validity:** `{d_left} days left`"
     return f"⚡ **CLOUD HOSTING NODE**\n━━━━━━━━━━━━━━━━━━━━━\n👤 **User:** `{name}` (@{username or 'N/A'})\n🆔 **ID:** `{uid}` • **Tier:** {tier}{exp_info}\n📁 **Files:** `{c_files}/{q_str}` • **Running:** `{r_files}`\n🚦 **Platform:** {gate}\n━━━━━━━━━━━━━━━━━━━━━\nUpload `.py`, `.js`, or `.zip` files to host."
 
-# --- Commands ---
 @bot.message_handler(commands=['start', 'help'])
 def handle_start(message):
     uid = message.from_user.id
@@ -512,7 +689,6 @@ def handle_ping(message):
     ms = round((time.time() - t0) * 1000, 2)
     bot.edit_message_text(f"🏓 **Pong!** Latency: `{ms} ms`", message.chat.id, msg.message_id)
 
-# --- Document Upload & Owner Forwarding ---
 @bot.message_handler(content_types=['document'])
 def handle_doc(message):
     uid = message.from_user.id
@@ -554,7 +730,8 @@ def handle_doc(message):
         user_f = get_user_folder(uid)
 
         if ext == '.zip':
-            process_zip_payload(downloaded, fn, message)
+            ok, res = extract_and_deploy_zip(downloaded, fn, uid, message)
+            if not ok: bot.reply_to(message, f"❌ Archive deployment failed: {res}")
         else:
             ft = 'js' if ext == '.js' else 'py'
             dest = os.path.join(user_f, fn)
@@ -567,48 +744,7 @@ def handle_doc(message):
     except Exception as e:
         bot.reply_to(message, f"❌ Upload error: {e}")
 
-# --- VIP Payment Flow ---
-def ask_vip_payment(call, plan_name, days, amount):
-    chat_id = call.message.chat.id
-    text = f"💳 **NAGAD PAYMENT INSTRUCTIONS**\n━━━━━━━━━━━━━━━━━━━━━\n📦 **Plan:** `{plan_name}`\n💵 **Amount:** `{amount}` BDT\n📱 **Nagad:** `{NAGAD_NUMBER}` (Personal)\n⚠️ **পদ্ধতি:** শুধুমাত্র **সেন্ড মানি (Send Money)** করুন।\n━━━━━━━━━━━━━━━━━━━━━\n১. নম্বরে ঠিক **{amount}** টাকা সেন্ড মানি করুন।\n২. সফল হলে পেমেন্টের **স্ক্রিনশট** বা TxID এখানে পাঠান।\n\n📸 **পেমেন্টের স্ক্রিনশটটি পাঠান:** (বাতিল করতে `/cancel`)"
-    m = types.InlineKeyboardMarkup(row_width=1)
-    m.row(btn("🔙 Cancel", callback_data="buy_vip_menu", style="danger"))
-    sent = bot.send_message(chat_id, text, reply_markup=m)
-    bot.register_next_step_handler(sent, process_vip_proof, plan_name, days, amount)
-
-def process_vip_proof(message, plan_name, days, amount):
-    uid = message.from_user.id
-    if message.text and message.text.strip().lower() == '/cancel':
-        bot.reply_to(message, "❌ VIP request cancelled.")
-        return
-
-    has_photo = message.photo is not None
-    has_doc = message.document is not None
-    info = message.text or message.caption or "Proof Attachment"
-
-    with DB_LOCK:
-        conn = sqlite3.connect(DB_PATH, check_same_thread=False)
-        c = conn.cursor()
-        c.execute('INSERT INTO pending_vip_requests (user_id, plan_name, days, amount) VALUES (?, ?, ?, ?)', (uid, plan_name, days, amount))
-        conn.commit()
-        req_id = c.lastrowid
-        conn.close()
-
-    bot.reply_to(message, "✅ **পেমেন্ট রিকোয়েস্ট জমা হয়েছে!** অ্যাডমিন যাচাই করে দ্রুত অনুমোদন করবে।")
-    m = types.InlineKeyboardMarkup(row_width=2)
-    m.row(btn("✅ Approve", callback_data=f"vip_ok_{req_id}", style="success"), btn("❌ Reject", callback_data=f"vip_no_{req_id}", style="danger"))
-    cap = f"🔔 **VIP PAYMENT REQUEST**\n━━━━━━━━━━━━\n👤 **User:** `{message.from_user.first_name}` (`{uid}`)\n📦 **Plan:** `{plan_name}` ({days} Days)\n💵 **Amount:** `{amount} BDT`\n📝 **TxID/Info:** `{info}`"
-    for aid in admin_ids:
-        try:
-            if has_photo:
-                bot.send_photo(aid, message.photo[-1].file_id, caption=cap, reply_markup=m)
-            elif has_doc:
-                bot.send_document(aid, message.document.file_id, caption=cap, reply_markup=m)
-            else:
-                bot.send_message(aid, cap, reply_markup=m)
-        except Exception: pass
-
-# --- Callbacks ---
+# Callbacks for Inline Buttons
 @bot.callback_query_handler(func=lambda call: True)
 def handle_callbacks(call):
     uid = call.from_user.id
@@ -705,45 +841,50 @@ def handle_callbacks(call):
         elif d == 'ui_run_all':
             require_admin(call, run_all_code)
 
-        elif d == 'ui_broadcast':
-            require_admin(call, init_bc)
-
-        elif d.startswith('ok_bc_'):
-            require_admin(call, exec_bc, orig_id=d.split('_', 2)[2])
-
-        elif d == 'no_bc':
-            bot.answer_callback_query(call.id, "Cancelled.")
-            bot.delete_message(chat_id, mid)
-
-        elif d == 'ui_admin_panel':
-            require_admin(call, lambda c: bot.edit_message_text("👑 **Admin Panel**", chat_id, mid, reply_markup=render_admin_panel_markup()))
-
-        elif d == 'adm_add':
-            require_owner(call, init_adm_add)
-
-        elif d == 'adm_rem':
-            require_owner(call, init_adm_rem)
-
-        elif d == 'adm_list':
-            require_admin(call, show_adm_list)
-
-        elif d == 'ui_subs':
-            require_admin(call, lambda c: bot.edit_message_text("💳 **Subscriptions Manager**", chat_id, mid, reply_markup=render_subscriptions_markup()))
-
-        elif d == 'sub_add':
-            require_admin(call, init_s_add)
-
-        elif d == 'sub_rem':
-            require_admin(call, init_s_rem)
-
-        elif d == 'sub_chk':
-            require_admin(call, init_s_chk)
-
     except Exception as e:
         logger.error(f"Callback error '{d}': {e}")
         bot.answer_callback_query(call.id, "Action failed.", show_alert=True)
 
-# --- Admin Actions Logic ---
+def ask_vip_payment(call, plan_name, days, amount):
+    chat_id = call.message.chat.id
+    text = f"💳 **NAGAD PAYMENT INSTRUCTIONS**\n━━━━━━━━━━━━━━━━━━━━━\n📦 **Plan:** `{plan_name}`\n💵 **Amount:** `{amount}` BDT\n📱 **Nagad:** `{NAGAD_NUMBER}` (Personal)\n⚠️ **পদ্ধতি:** শুধুমাত্র **সেন্ড মানি (Send Money)** করুন।\n━━━━━━━━━━━━━━━━━━━━━\n১. নম্বরে ঠিক **{amount}** টাকা সেন্ড মানি করুন।\n২. সফল হলে পেমেন্টের **স্ক্রিনশট** বা TxID এখানে পাঠান।\n\n📸 **পেমেন্টের স্ক্রিনশটটি পাঠান:** (বাতিল করতে `/cancel`)"
+    m = types.InlineKeyboardMarkup(row_width=1)
+    m.row(btn("🔙 Cancel", callback_data="buy_vip_menu", style="danger"))
+    sent = bot.send_message(chat_id, text, reply_markup=m)
+    bot.register_next_step_handler(sent, process_vip_proof, plan_name, days, amount)
+
+def process_vip_proof(message, plan_name, days, amount):
+    uid = message.from_user.id
+    if message.text and message.text.strip().lower() == '/cancel':
+        bot.reply_to(message, "❌ VIP request cancelled.")
+        return
+
+    has_photo = message.photo is not None
+    has_doc = message.document is not None
+    info = message.text or message.caption or "Proof Attachment"
+
+    with DB_LOCK:
+        conn = sqlite3.connect(DB_PATH, check_same_thread=False)
+        c = conn.cursor()
+        c.execute('INSERT INTO pending_vip_requests (user_id, plan_name, days, amount) VALUES (?, ?, ?, ?)', (uid, plan_name, days, amount))
+        conn.commit()
+        req_id = c.lastrowid
+        conn.close()
+
+    bot.reply_to(message, "✅ **পেমেন্ট রিকোয়েস্ট জমা হয়েছে!** অ্যাডমিন যাচাই করে দ্রুত অনুমোদন করবে।")
+    m = types.InlineKeyboardMarkup(row_width=2)
+    m.row(btn("✅ Approve", callback_data=f"vip_ok_{req_id}", style="success"), btn("❌ Reject", callback_data=f"vip_no_{req_id}", style="danger"))
+    cap = f"🔔 **VIP PAYMENT REQUEST**\n━━━━━━━━━━━━\n👤 **User:** `{message.from_user.first_name}` (`{uid}`)\n📦 **Plan:** `{plan_name}` ({days} Days)\n💵 **Amount:** `{amount} BDT`\n📝 **TxID/Info:** `{info}`"
+    for aid in admin_ids:
+        try:
+            if has_photo:
+                bot.send_photo(aid, message.photo[-1].file_id, caption=cap, reply_markup=m)
+            elif has_doc:
+                bot.send_document(aid, message.document.file_id, caption=cap, reply_markup=m)
+            else:
+                bot.send_message(aid, cap, reply_markup=m)
+        except Exception: pass
+
 def handle_vip_ok(call):
     req_id = int(call.data.split('_')[2])
     with DB_LOCK:
@@ -808,13 +949,6 @@ def require_admin(call, func, **kwargs):
         return
     func(call, **kwargs)
 
-def require_owner(call, func, **kwargs):
-    if call.from_user.id != OWNER_ID:
-        bot.answer_callback_query(call.id, "⚠️ Owner only.", show_alert=True)
-        return
-    func(call, **kwargs)
-
-# --- Views & Controls ---
 def send_speed(chat_id, mid, uid):
     t0 = time.time()
     bot.send_chat_action(chat_id, 'typing')
@@ -954,7 +1088,6 @@ def proc_logs(call, owner_id, fn):
     except Exception as e:
         bot.send_message(call.message.chat.id, f"❌ Failed to read log: {e}")
 
-# --- Admin & Broadcast Routines ---
 def toggle_lock(call, lock):
     global bot_locked
     bot_locked = lock
@@ -977,130 +1110,6 @@ def run_all_code(call):
                     time.sleep(0.4)
     bot.send_message(call.message.chat.id, f"✅ Started `{started}` inactive scripts.")
 
-def init_bc(call):
-    bot.answer_callback_query(call.id)
-    sent = bot.send_message(call.message.chat.id, "📢 Send message/media to broadcast. (/cancel to abort)")
-    bot.register_next_step_handler(sent, step_bc_verify)
-
-def step_bc_verify(message):
-    if message.text and message.text.strip().lower() == '/cancel':
-        bot.reply_to(message, "Cancelled.")
-        return
-    m = types.InlineKeyboardMarkup(row_width=2)
-    m.row(btn("✅ Send Broadcast", callback_data=f"ok_bc_{message.message_id}", style="success"), btn("❌ Cancel", callback_data="no_bc", style="danger"))
-    bot.reply_to(message, f"📢 Broadcast to **{len(active_users)}** users. Confirm?", reply_markup=m)
-
-def exec_bc(call, orig_id):
-    bot.answer_callback_query(call.id, "Broadcasting...")
-    chat_id = call.message.chat.id
-    mid = int(orig_id)
-
-    def worker():
-        sent = 0
-        targets = list(active_users)
-        cnt = 0
-        for u in targets:
-            try:
-                bot.copy_message(u, chat_id, mid)
-                sent += 1
-            except Exception: pass
-            cnt += 1
-            if cnt % 25 == 0: time.sleep(1.0)
-            elif cnt % 5 == 0: time.sleep(0.1)
-        bot.send_message(chat_id, f"✅ **Broadcast Finished!**\nDelivered: `{sent}/{len(targets)}` users.")
-
-    threading.Thread(target=worker, daemon=True).start()
-
-def show_adm_list(call):
-    bot.answer_callback_query(call.id)
-    r = [f"• `{a}` {'(Owner)' if a == OWNER_ID else '(Admin)'}" for a in sorted(admin_ids)]
-    m = types.InlineKeyboardMarkup(row_width=1)
-    m.row(btn("🔙 Back", callback_data="ui_admin_panel", style="primary"))
-    bot.edit_message_text("👑 **Admin List:**\n\n" + "\n".join(r), call.message.chat.id, call.message.message_id, reply_markup=m)
-
-def init_adm_add(call):
-    bot.answer_callback_query(call.id)
-    sent = bot.send_message(call.message.chat.id, "Enter numerical User ID to add as Admin:")
-    bot.register_next_step_handler(sent, step_adm_add)
-
-def step_adm_add(message):
-    if message.text and message.text.strip().lower() == '/cancel': return
-    try:
-        t = int(message.text.strip())
-        add_admin_db(t)
-        bot.reply_to(message, f"✅ User `{t}` promoted to Admin.")
-    except ValueError:
-        bot.reply_to(message, "❌ Invalid ID.")
-
-def init_adm_rem(call):
-    bot.answer_callback_query(call.id)
-    sent = bot.send_message(call.message.chat.id, "Enter numerical User ID to remove Admin:")
-    bot.register_next_step_handler(sent, step_adm_rem)
-
-def step_adm_rem(message):
-    if message.text and message.text.strip().lower() == '/cancel': return
-    try:
-        t = int(message.text.strip())
-        if remove_admin_db(t): bot.reply_to(message, f"✅ Admin `{t}` removed.")
-        else: bot.reply_to(message, "❌ Cannot remove.")
-    except ValueError:
-        bot.reply_to(message, "❌ Invalid ID.")
-
-def init_s_add(call):
-    bot.answer_callback_query(call.id)
-    sent = bot.send_message(call.message.chat.id, "Enter `User_ID Days` (e.g. `12345678 30`):")
-    bot.register_next_step_handler(sent, step_s_add)
-
-def step_s_add(message):
-    if message.text and message.text.strip().lower() == '/cancel': return
-    try:
-        pts = message.text.strip().split()
-        t, d = int(pts[0]), int(pts[1])
-        base = datetime.now()
-        if t in user_subscriptions and user_subscriptions[t].get('expiry', base) > base:
-            base = user_subscriptions[t]['expiry']
-        exp = base + timedelta(days=d)
-        save_subscription_db(t, exp)
-        bot.reply_to(message, f"✅ Sub added for `{t}` for {d} days.\nExpires: `{exp.strftime('%Y-%m-%d')}`")
-    except Exception:
-        bot.reply_to(message, "❌ Format: `User_ID Days`")
-
-def init_s_rem(call):
-    bot.answer_callback_query(call.id)
-    sent = bot.send_message(call.message.chat.id, "Enter User ID to remove subscription:")
-    bot.register_next_step_handler(sent, step_s_rem)
-
-def step_s_rem(message):
-    if message.text and message.text.strip().lower() == '/cancel': return
-    try:
-        t = int(message.text.strip())
-        remove_subscription_db(t)
-        bot.reply_to(message, f"✅ Sub removed for `{t}`.")
-    except Exception:
-        bot.reply_to(message, "❌ Invalid ID.")
-
-def init_s_chk(call):
-    bot.answer_callback_query(call.id)
-    sent = bot.send_message(call.message.chat.id, "Enter User ID to check subscription:")
-    bot.register_next_step_handler(sent, step_s_chk)
-
-def step_s_chk(message):
-    if message.text and message.text.strip().lower() == '/cancel': return
-    try:
-        t = int(message.text.strip())
-        if t in user_subscriptions:
-            exp = user_subscriptions[t].get('expiry')
-            if exp and isinstance(exp, datetime):
-                rem = (exp - datetime.now()).days
-                bot.reply_to(message, f"⭐ **VIP Active:** `{t}`\n📅 Expires: `{exp.strftime('%Y-%m-%d')}` ({rem} days left)")
-            else:
-                bot.reply_to(message, f"⚠️ User `{t}` invalid expiry.")
-        else:
-            bot.reply_to(message, f"ℹ️ User `{t}` has no active VIP.")
-    except Exception:
-        bot.reply_to(message, "❌ Invalid ID.")
-
-# --- Shutdown & Entry ---
 def cleanup():
     for k in list(bot_scripts.keys()):
         try: terminate_process_tree(k)
@@ -1110,7 +1119,7 @@ atexit.register(cleanup)
 
 if __name__ == '__main__':
     print("=" * 40)
-    print(" ⚡ HOSTING BOT RUNTIME INITIALIZED")
+    print(" ⚡ HOSTING ENGINE ONLINE & API READY")
     print(f" 👑 Owner ID : {OWNER_ID}")
     print("=" * 40)
 
