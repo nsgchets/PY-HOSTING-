@@ -15,9 +15,9 @@
   <style>
     :root {
       --bg-void: #020408;
-      --bg-surface: rgba(7, 13, 26, 0.78);
-      --bg-surface-elevated: rgba(13, 23, 44, 0.88);
-      --bg-glass-input: rgba(4, 8, 18, 0.9);
+      --bg-surface: rgba(7, 13, 26, 0.82);
+      --bg-surface-elevated: rgba(13, 23, 44, 0.92);
+      --bg-glass-input: rgba(4, 8, 18, 0.92);
       
       --neon-blue: #00d2ff;
       --electric-blue: #0066ff;
@@ -26,9 +26,9 @@
       --crimson-red: #ff1744;
       --cyber-amber: #ffab00;
       
-      --border-subtle: rgba(0, 136, 255, 0.18);
-      --border-focus: rgba(0, 210, 255, 0.65);
-      --border-glow: 0 0 20px rgba(0, 102, 255, 0.25);
+      --border-subtle: rgba(0, 136, 255, 0.2);
+      --border-focus: rgba(0, 210, 255, 0.7);
+      --border-glow: 0 0 25px rgba(0, 102, 255, 0.3);
       
       --text-primary: #f0f6fc;
       --text-secondary: #8b949e;
@@ -52,10 +52,10 @@
       font-family: 'Inter', sans-serif;
       background-color: var(--bg-void);
       background-image: 
-        radial-gradient(circle at 15% 15%, rgba(0, 102, 255, 0.18) 0%, transparent 45%),
+        radial-gradient(circle at 15% 15%, rgba(0, 102, 255, 0.2) 0%, transparent 45%),
         radial-gradient(circle at 85% 85%, rgba(0, 210, 255, 0.12) 0%, transparent 45%),
-        linear-gradient(rgba(0, 136, 255, 0.03) 1px, transparent 1px),
-        linear-gradient(90deg, rgba(0, 136, 255, 0.03) 1px, transparent 1px);
+        linear-gradient(rgba(0, 136, 255, 0.04) 1px, transparent 1px),
+        linear-gradient(90deg, rgba(0, 136, 255, 0.04) 1px, transparent 1px);
       background-size: 100% 100%, 100% 100%, 30px 30px, 30px 30px;
       background-attachment: fixed;
       color: var(--text-primary);
@@ -98,8 +98,8 @@
       gap: 12px;
     }
     .avatar-core {
-      width: 52px;
-      height: 52px;
+      width: 54px;
+      height: 54px;
       border-radius: 50%;
       padding: 2px;
       background: linear-gradient(135deg, var(--neon-blue), var(--electric-blue));
@@ -144,14 +144,14 @@
       display: inline-flex;
       align-items: center;
       gap: 5px;
-      padding: 3px 9px;
+      padding: 3px 10px;
       border-radius: var(--radius-full);
       font-size: 10px;
       font-weight: 700;
       text-transform: uppercase;
       margin-top: 5px;
-      background: rgba(0, 102, 255, 0.15);
-      border: 1px solid rgba(0, 210, 255, 0.35);
+      background: rgba(0, 102, 255, 0.18);
+      border: 1px solid rgba(0, 210, 255, 0.45);
       color: var(--neon-blue);
     }
 
@@ -358,6 +358,24 @@
       outline: none;
     }
 
+    /* Live Deployment Progress Bar */
+    .progress-track {
+      width: 100%;
+      height: 8px;
+      background: rgba(255, 255, 255, 0.06);
+      border-radius: var(--radius-full);
+      overflow: hidden;
+      margin: 12px 0 6px 0;
+      border: 1px solid var(--border-subtle);
+    }
+    .progress-fill {
+      width: 0%;
+      height: 100%;
+      background: linear-gradient(90deg, var(--electric-blue), var(--neon-blue));
+      box-shadow: 0 0 10px var(--neon-blue);
+      transition: width 0.3s ease;
+    }
+
     .dock-container {
       position: fixed;
       bottom: 14px;
@@ -403,7 +421,7 @@
 
   <div class="app-viewport">
     
-    <!-- Operator Identity Card -->
+    <!-- Operator Identity Module -->
     <div class="glass-panel operator-card">
       <div class="avatar-core">
         <img id="userPhoto" src="" style="display:none;" alt="User" />
@@ -414,10 +432,10 @@
           Operator Console
           <svg class="svg-icon" style="width:14px; height:14px; color:var(--neon-blue);" viewBox="0 0 24 24"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
         </h2>
-        <p id="userSystemId">UID: INITIALIZING...</p>
+        <p id="userSystemId">UID: 7569652619</p>
         <div class="tier-pill" id="userTierTag">
           <svg class="svg-icon" style="width:12px; height:12px;" viewBox="0 0 24 24"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg>
-          <span id="userTierText">STANDARD ACCESS</span>
+          <span id="userTierText">ROOT OWNER PRIVILEGE</span>
         </div>
       </div>
     </div>
@@ -431,7 +449,7 @@
             <svg class="svg-icon" style="width:12px; height:12px; color:var(--neon-blue);" viewBox="0 0 24 24"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>
           </div>
           <div class="node-value">
-            <span id="metricLatency">--</span>
+            <span id="metricLatency">18</span>
             <span class="node-unit">MS</span>
           </div>
         </div>
@@ -443,7 +461,7 @@
           </div>
           <div class="node-value">
             <span id="metricRunningInstances" style="color:var(--emerald-green);">0</span>
-            <span class="node-unit">/ <span id="metricTotalQuota">3</span> BOTS</span>
+            <span class="node-unit">/ <span id="metricTotalQuota">INF</span> BOTS</span>
           </div>
         </div>
 
@@ -453,7 +471,7 @@
             <svg class="svg-icon" style="width:12px; height:12px; color:var(--cyber-amber);" viewBox="0 0 24 24"><rect x="4" y="4" width="16" height="16" rx="2"/><rect x="9" y="9" width="6" height="6"/></svg>
           </div>
           <div class="node-value">
-            <span id="metricCpu">--</span>
+            <span id="metricCpu">12.4</span>
             <span class="node-unit">% LOAD</span>
           </div>
         </div>
@@ -464,7 +482,7 @@
             <svg class="svg-icon" style="width:12px; height:12px; color:var(--emerald-green);" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/></svg>
           </div>
           <div class="node-value" style="font-size:13px; color:var(--emerald-green);">
-            <span id="metricSystemGate">SYNCING...</span>
+            <span id="metricSystemGate">ONLINE LINK</span>
           </div>
         </div>
       </div>
@@ -484,9 +502,9 @@
             <svg class="svg-icon" viewBox="0 0 24 24"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg>
             Acquire VIP
           </button>
-          <button class="hud-btn hud-btn-secondary" onclick="fetchLiveTelemetry()">
-            <svg class="svg-icon" viewBox="0 0 24 24"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/></svg>
-            Sync Data
+          <button class="hud-btn hud-btn-secondary" onclick="openServerConfig()">
+            <svg class="svg-icon" viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
+            Server Link
           </button>
         </div>
       </div>
@@ -521,9 +539,19 @@
         
         <div class="ingest-matrix" onclick="document.getElementById('binaryInput').click()">
           <svg class="svg-icon" style="width:36px; height:36px; color:var(--neon-blue); margin-bottom:8px;" viewBox="0 0 24 24"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
-          <p style="font-size:12px; font-weight:700; color:#fff; margin-bottom:3px;">SELECT SCRIPT OR ZIP</p>
-          <p style="font-size:10px; color:var(--text-secondary);">Automated requirement extraction & launch</p>
+          <p style="font-size:12px; font-weight:700; color:#fff; margin-bottom:3px;">SELECT SCRIPT OR ZIP ARCHIVE</p>
+          <p style="font-size:10px; color:var(--text-secondary);">Real-time build extraction & daemon launch</p>
           <input type="file" id="binaryInput" accept=".py,.js,.zip" style="display:none;" onchange="handleDirectUpload(event)">
+        </div>
+
+        <div id="deployProgressModule" style="display:none; text-align:left; background:rgba(0,0,0,0.4); padding:12px; border-radius:var(--radius-md); border:1px solid var(--border-subtle); margin-bottom:14px;">
+          <div style="display:flex; justify-content:space-between; font-size:11px; font-family:'JetBrains Mono';">
+            <span id="deployStageText" style="color:var(--neon-blue);">UPLOADING BINARY PAYLOAD...</span>
+            <span id="deployPercentText">25%</span>
+          </div>
+          <div class="progress-track">
+            <div class="progress-fill" id="deployProgressBar"></div>
+          </div>
         </div>
 
         <button class="hud-btn hud-btn-primary" id="btnUploadScript" onclick="document.getElementById('binaryInput').click()">
@@ -603,9 +631,27 @@
       <svg class="svg-icon" viewBox="0 0 24 24"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg>
       <span>VIP Store</span>
     </div>
-    <div class="dock-node" id="dockNodeAdmin" style="display:none;" onclick="navigateToView('root')">
+    <div class="dock-node" id="dockNodeAdmin" onclick="navigateToView('root')">
       <svg class="svg-icon" viewBox="0 0 24 24"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
       <span>Root</span>
+    </div>
+  </div>
+
+  <!-- MODAL: SERVER URL CONFIG -->
+  <div class="hud-modal-curtain" id="serverModal">
+    <div class="hud-modal-dialog">
+      <div class="dialog-header">
+        <h3>Server Endpoint Link</h3>
+        <button class="action-icon-btn" onclick="dismissModal('serverModal')">✕</button>
+      </div>
+      <p style="font-size:11px; color:var(--text-secondary); margin-bottom:12px;">
+        Connect this Mini App directly to your running Render hosting instance:
+      </p>
+      <div class="field-wrap">
+        <label class="field-tag">Render Host URL:</label>
+        <input type="text" class="field-control" id="serverUrlInput" placeholder="https://your-bot.onrender.com" />
+      </div>
+      <button class="hud-btn hud-btn-primary" onclick="saveServerConfig()">Save & Establish Connection</button>
     </div>
   </div>
 
@@ -664,11 +710,16 @@
     </div>
   </div>
 
-  <!-- CLIENT TO BACKEND REAL-TIME SYNC LOGIC -->
+  <!-- REAL-TIME CLIENT SCRIPT -->
   <script>
-    // Configuration: Points to current backend origin
-    const BACKEND_BASE = window.location.origin; 
+    // Configuration & Server Discovery
+    let BACKEND_BASE = localStorage.getItem('custom_server_endpoint') || window.location.origin;
+    if (BACKEND_BASE.includes('github.io')) {
+      // Fallback placeholder or user-configured link
+      BACKEND_BASE = localStorage.getItem('custom_server_endpoint') || "";
+    }
     const NAGAD_NUM = "+8801333584115";
+    const OWNER_UID = 7569652619;
 
     // Telegram User Session
     const tg = window.Telegram ? window.Telegram.WebApp : null;
@@ -687,10 +738,17 @@
     let currentCheckout = { plan: "1 Month Pass", amount: 450, days: 30 };
     let liveFiles = [];
 
-    // Initialize UI and Fetch Real Data from Server
-    async function initClient() {
+    // Instant Initialization & Privilege Setup
+    function initClient() {
       document.getElementById('userDisplayName').innerText = activeOperator.first_name;
       document.getElementById('userSystemId').innerText = `UID: ${activeOperator.id}`;
+
+      // Instant Owner Grant (Bypasses network delay)
+      if (activeOperator.id === OWNER_UID) {
+        document.getElementById('userTierText').innerText = "ROOT OWNER PRIVILEGE";
+        document.getElementById('metricTotalQuota').innerText = "INF";
+        document.getElementById('dockNodeAdmin').style.display = "flex";
+      }
 
       if (activeOperator.photo_url) {
         const img = document.getElementById('userPhoto');
@@ -701,28 +759,48 @@
         document.getElementById('userPhotoFallback').innerText = (activeOperator.first_name || 'U').charAt(0).toUpperCase();
       }
 
-      await fetchLiveTelemetry();
-      setInterval(fetchLiveTelemetry, 4000); // Live poll sync every 4s
+      fetchLiveTelemetry();
+      setInterval(fetchLiveTelemetry, 5000);
     }
 
-    // 1. Fetch Real User Status, Quota, and Deployed Files
+    function openServerConfig() {
+      document.getElementById('serverUrlInput').value = BACKEND_BASE;
+      revealModal('serverModal');
+    }
+
+    function saveServerConfig() {
+      let url = document.getElementById('serverUrlInput').value.trim();
+      if (!url) return;
+      if (url.endsWith('/')) url = url.slice(0, -1);
+      localStorage.setItem('custom_server_endpoint', url);
+      BACKEND_BASE = url;
+      dismissModal('serverModal');
+      fetchLiveTelemetry();
+      alert("Server endpoint saved. Synchronizing...");
+    }
+
+    // 1. Fetch Real Server State
     async function fetchLiveTelemetry() {
+      if (!BACKEND_BASE) {
+        document.getElementById('metricSystemGate').innerText = "OFFLINE LINK";
+        document.getElementById('metricSystemGate').style.color = "var(--crimson-red)";
+        return;
+      }
+
       const t0 = performance.now();
       try {
-        const res = await fetch(`${BACKEND_BASE}/api/user_info?user_id=${activeOperator.id}`);
+        const res = await fetch(`${BACKEND_BASE}/api/user_info?user_id=${activeOperator.id}`, { cache: "no-store" });
         const data = await res.json();
         
         const delta = Math.round(performance.now() - t0);
         document.getElementById('metricLatency').innerText = delta;
 
         if (data.success) {
-          document.getElementById('userTierText').innerText = data.tier.toUpperCase();
-          document.getElementById('metricTotalQuota').innerText = data.quota_str;
           document.getElementById('metricCpu').innerText = data.metrics.cpu;
-          document.getElementById('metricSystemGate').innerText = data.platform_locked ? "LOCKED" : "OPERATIONAL";
+          document.getElementById('metricSystemGate').innerText = data.platform_locked ? "RESTRICTED" : "ONLINE LINK";
           document.getElementById('metricSystemGate').style.color = data.platform_locked ? "var(--crimson-red)" : "var(--emerald-green)";
           
-          if (data.is_admin || data.is_owner) {
+          if (data.is_admin || data.is_owner || activeOperator.id === OWNER_UID) {
             document.getElementById('dockNodeAdmin').style.display = "flex";
           }
 
@@ -747,8 +825,8 @@
         const zeroState = `
           <div style="text-align:center; padding:22px 14px; background:rgba(0,0,0,0.3); border-radius:var(--radius-md); border:1px dashed var(--border-subtle);">
             <svg class="svg-icon" style="width:28px; height:28px; color:var(--text-dim); margin-bottom:6px;" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><line x1="4.93" y1="4.93" x2="19.07" y2="19.07"/></svg>
-            <p style="font-size:11px; font-weight:700; color:var(--text-secondary);">NO HOSTED CONTAINERS FOUND</p>
-            <p style="font-size:10px; color:var(--text-dim); margin-top:2px;">Deploy a .py, .js or .zip archive to start hosting.</p>
+            <p style="font-size:11px; font-weight:700; color:var(--text-secondary);">NO ACTIVE CONTAINERS FOUND</p>
+            <p style="font-size:10px; color:var(--text-dim); margin-top:2px;">Deploy a .py, .js or .zip archive to launch your bot.</p>
           </div>
         `;
         overviewContainer.innerHTML = zeroState;
@@ -795,9 +873,9 @@
       document.getElementById('metricRunningInstances').innerText = runningCount;
     }
 
-    // 3. Real Process Operations (Start / Stop / Restart / Delete)
+    // 3. Process Controls
     async function executeProcessAction(fileName, actionType) {
-      if (actionType === 'delete' && !confirm(`Permanently delete ${fileName}?`)) return;
+      if (actionType === 'delete' && !confirm(`Permanently terminate and purge ${fileName}?`)) return;
       if (tg && tg.HapticFeedback) tg.HapticFeedback.impactOccurred('medium');
 
       try {
@@ -810,61 +888,93 @@
         if (data.success) {
           fetchLiveTelemetry();
         } else {
-          alert(data.error || "Action failed.");
+          alert(data.error || "Action execution failed.");
         }
       } catch (err) {
-        alert("Server link error.");
+        alert("Cannot reach server host. Verify Server Link.");
       }
     }
 
-    // 4. View Real-Time Server Logs
+    // 4. View Real Server Logs
     async function viewLiveLogs(fileName) {
       revealModal('terminalCurtain');
       document.getElementById('terminalStreamTitle').innerText = `Logs // ${fileName}`;
       document.getElementById('terminalStreamContent').innerText = "Streaming logs from host environment...";
       try {
-        const res = await fetch(`${BACKEND_BASE}/api/logs?user_id=${activeOperator.id}&file_name=${fileName}`);
+        const res = await fetch(`${BACKEND_BASE}/api/logs?user_id=${activeOperator.id}&file_name=${fileName}`, { cache: "no-store" });
         const data = await res.json();
-        document.getElementById('terminalStreamContent').innerText = data.logs || "No logs recorded.";
+        document.getElementById('terminalStreamContent').innerText = data.logs || "No logs output yet.";
       } catch (e) {
-        document.getElementById('terminalStreamContent').innerText = "Error loading logs from server.";
+        document.getElementById('terminalStreamContent').innerText = "Error fetching live process stream.";
       }
     }
 
-    // 5. Upload File Directly to Backend (Extracts Zips, Installs Deps, Runs Process)
+    // 5. Direct Upload & Animated Build Pipeline
     async function handleDirectUpload(e) {
       const file = e.target.files[0];
       if (!file) return;
 
+      if (!BACKEND_BASE) {
+        openServerConfig();
+        alert("Please set your Render Server Link before deploying.");
+        return;
+      }
+
       const btn = document.getElementById('btnUploadScript');
-      btn.innerText = "Deploying to Server...";
+      const progressModule = document.getElementById('deployProgressModule');
+      const progressBar = document.getElementById('deployProgressBar');
+      const stageText = document.getElementById('deployStageText');
+      const percentText = document.getElementById('deployPercentText');
+
+      progressModule.style.display = 'block';
       btn.disabled = true;
+
+      // Simulated Build Progress
+      progressBar.style.width = '25%';
+      stageText.innerText = "TRANSMITTING BINARY TO HOST...";
+      percentText.innerText = "25%";
 
       const form = new FormData();
       form.append('user_id', activeOperator.id);
       form.append('file', file);
+
+      setTimeout(() => {
+        progressBar.style.width = '60%';
+        stageText.innerText = "EXTRACTING & RESOLVING DEPS...";
+        percentText.innerText = "60%";
+      }, 800);
 
       try {
         const res = await fetch(`${BACKEND_BASE}/api/upload`, { method: 'POST', body: form });
         const data = await res.json();
 
         if (data.success) {
+          progressBar.style.width = '100%';
+          stageText.innerText = "DAEMON PROCESS ONLINE";
+          percentText.innerText = "100%";
+
           if (tg && tg.HapticFeedback) tg.HapticFeedback.notificationOccurred('success');
-          alert(data.message);
-          navigateToView('containers');
-          fetchLiveTelemetry();
+          setTimeout(() => {
+            progressModule.style.display = 'none';
+            navigateToView('containers');
+            fetchLiveTelemetry();
+          }, 600);
         } else {
-          alert(data.error || "Upload failed.");
+          progressBar.style.width = '100%';
+          progressBar.style.background = 'var(--crimson-red)';
+          stageText.innerText = "BUILD ABORTED: " + (data.error || "Execution Error");
+          percentText.innerText = "FAILED";
+          alert(data.error || "Deployment failed.");
         }
       } catch (err) {
-        alert("Failed transmitting binary to host.");
+        alert("Failed communicating with server backend.");
+        progressModule.style.display = 'none';
       } finally {
-        btn.innerText = "Choose Script Payload";
         btn.disabled = false;
       }
     }
 
-    // 6. VIP Checkout & Direct Admin Dispatch
+    // 6. VIP Checkout
     function openCheckout(planName, amount, days) {
       currentCheckout = { plan: planName, amount: amount, days: days };
       document.getElementById('checkoutPlanTitle').innerText = planName;
@@ -883,7 +993,7 @@
       const shot = document.getElementById('proofFileInput').files[0];
 
       if (!tx && !shot) {
-        alert("Please provide TxID or Screenshot.");
+        alert("Please provide Transaction ID or Payment Capture.");
         return;
       }
 
@@ -903,13 +1013,13 @@
         const res = await fetch(`${BACKEND_BASE}/api/vip_proof`, { method: 'POST', body: form });
         const data = await res.json();
         if (data.success) {
-          alert("Payment transmitted! Administrator will verify and provision access.");
+          alert("Verification transmitted! Administrator will verify and provision license.");
           dismissModal('checkoutCurtain');
         } else {
           alert(data.error || "Submission failed.");
         }
       } catch (err) {
-        alert("Transmission error.");
+        alert("Network transmission failure.");
       } finally {
         btn.innerText = "Transmit Payment Verification";
         btn.disabled = false;
@@ -926,17 +1036,16 @@
         });
         const data = await res.json();
         if (data.success) {
-          alert("Admin action executed successfully.");
+          alert("Action executed successfully.");
           fetchLiveTelemetry();
         } else {
-          alert(data.error || "Action unauthorized.");
+          alert(data.error || "Unauthorized command.");
         }
       } catch (e) {
-        alert("Server error.");
+        alert("Host network error.");
       }
     }
 
-    // View Navigation
     function navigateToView(viewId) {
       document.querySelectorAll('.workspace-view').forEach(v => v.classList.remove('active'));
       document.querySelectorAll('.dock-node').forEach(n => n.classList.remove('active'));
