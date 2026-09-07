@@ -43,7 +43,7 @@ def btn(text, callback_data=None, url=None, style=None):
     return b
 
 # --- Configuration & Credentials ---
-TOKEN = '7978624354:AAGOkDuK_zmvo1CtFpqncZceak1BxTk7iGU'
+TOKEN = '7978624354:AAE3o-tfWbeUsMM7ujEeks-ykCed7zp48mM'
 OWNER_ID = 7569652619
 ADMIN_ID = 7569652619
 YOUR_USERNAME = '@nsg_cheats_onwer'
